@@ -8,6 +8,7 @@ import pretix.presale.views.order
 import pretix.presale.views.organizer
 import pretix.presale.views.user
 import pretix.presale.views.waiting
+import pretix.presale.views.widget
 
 # This is not a valid Django URL configuration, as the final
 # configuration is done by the pretix.multidomain package.
@@ -60,6 +61,9 @@ event_patterns = [
         pretix.presale.views.event.EventIcalDownload.as_view(),
         name='event.ical.download'),
     url(r'^auth/$', pretix.presale.views.event.EventAuth.as_view(), name='event.auth'),
+    url(r'^widget.js$', pretix.presale.views.widget.widget_js, name='event.widget.js'),
+    url(r'^widget/product_list$', pretix.presale.views.widget.WidgetAPIProductList.as_view(),
+        name='event.widget.productlist'),
     url(r'^$', pretix.presale.views.event.EventIndex.as_view(), name='event.index'),
 ]
 
