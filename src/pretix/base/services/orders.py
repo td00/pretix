@@ -21,7 +21,9 @@ from pretix.base.models import (
     CartPosition, Event, Item, ItemVariation, Order, OrderPosition, Quota,
     User, Voucher,
 )
-from pretix.base.models.orders import InvoiceAddress
+from pretix.base.models.orders import (
+    InvoiceAddress, generate_position_secret, generate_secret,
+)
 from pretix.base.payment import BasePaymentProvider
 from pretix.base.services.async import ProfiledTask
 from pretix.base.services.invoices import (
@@ -445,6 +447,7 @@ class OrderChangeManager:
     ItemOperation = namedtuple('ItemOperation', ('position', 'item', 'variation', 'price'))
     PriceOperation = namedtuple('PriceOperation', ('position', 'price'))
     CancelOperation = namedtuple('CancelOperation', ('position',))
+    SplitOperation = namedtuple('SplitOperation', ('position',))
 
     def __init__(self, order: Order, user):
         self.order = order
@@ -474,6 +477,9 @@ class OrderChangeManager:
         self._quotadiff.subtract(position.variation.quotas.all() if position.variation else position.item.quotas.all())
         self._operations.append(self.CancelOperation(position))
 
+    def split(self, position: OrderPosition):
+        self._operations.append(self.SplitOperation(position))
+
     def _check_quotas(self):
         for quota, diff in self._quotadiff.items():
             if diff <= 0:
@@ -494,6 +500,8 @@ class OrderChangeManager:
                 raise OrderError(self.error_messages['paid_to_free_exceeded'])
 
     def _perform_operations(self):
+        split_positions = []
+
         for op in self._operations:
             if isinstance(op, self.ItemOperation):
                 self.order.log_action('pretix.event.order.changed.item', user=self.user, data={
@@ -527,6 +535,57 @@ class OrderChangeManager:
                     'old_price': op.position.price,
                 })
                 op.position.delete()
+            elif isinstance(op, self.SplitOperation):
+                split_positions.append(op.position)
+
+        if split_positions:
+            self._create_split_order(split_positions)
+
+    def _create_split_order(self, split_positions):
+        split_order = Order.objects.get(pk=self.order.pk)
+        split_order.pk = None
+        split_order.code = None
+        split_order.datetime = now()
+        split_order.payment_fee_tax_rate = None
+        split_order.payment_fee_tax_value = None
+        split_order.secret = generate_secret()
+        split_order.save()
+        split_order.log_action('pretix.event.order.changed.split_from', user=self.user, data={
+            'original_order': self.order.code
+        })
+
+        for op in split_positions:
+            self.order.log_action('pretix.event.order.changed.split', user=self.user, data={
+                'position': op.pk,
+                'old_item': op.item.pk,
+                'old_variation': op.variation.pk if op.variation else None,
+                'old_price': op.price,
+                'new_order': split_order.code,
+            })
+            op.order = split_order
+            op.secret = generate_position_secret()
+            op.save()
+
+        split_order.total = sum([p.price for p in split_positions])
+        if split_order.total == 0:
+            payment_fee = Decimal('0.00')
+        else:
+            payment_fee = self._get_payment_provider().calculate_fee(split_order.total)
+        split_order.payment_fee = payment_fee
+        split_order.total += payment_fee
+        split_order._calculate_tax()
+        split_order.save()
+
+        try:
+            ia = self.order.invoice_address
+            ia.pk = None
+            ia.order = split_order
+            ia.save()
+        except InvoiceAddress.DoesNotExist:
+            pass
+
+        if self.order.invoices.filter(is_cancellation=False).last():
+            generate_invoice(split_order)
 
     def _recalculate_total_and_payment_fee(self):
         self.order.total = sum([p.price for p in self.order.positions.all()])
@@ -546,7 +605,7 @@ class OrderChangeManager:
             generate_invoice(self.order)
 
     def _check_complete_cancel(self):
-        cancels = len([o for o in self._operations if isinstance(o, self.CancelOperation)])
+        cancels = len([o for o in self._operations if isinstance(o, self.CancelOperation) or isinstance(o, self.SplitOperation)])
         if cancels == self.order.positions.count():
             raise OrderError(self.error_messages['complete_cancel'])
 

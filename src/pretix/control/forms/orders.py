@@ -66,7 +66,8 @@ class OrderPositionChangeForm(forms.Form):
         choices=(
             ('product', 'Change product'),
             ('price', 'Change price'),
-            ('cancel', 'Remove product')
+            ('cancel', 'Remove product'),
+            ('split', 'Split into new order'),
         )
     )
 

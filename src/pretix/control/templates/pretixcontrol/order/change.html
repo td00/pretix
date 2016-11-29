@@ -31,6 +31,12 @@
             If an invoice is attached to the order, a cancellation will be created together with a new invoice.
         {% endblocktrans %}
     </p>
+    <p>
+        {% blocktrans trimmed %}
+            If you chose "split into new order" for multiple positions, they will be all split in one second order
+            together, not multiple orders.
+        {% endblocktrans %}
+    </p>
     <div class="alert alert-warning">
         {% blocktrans trimmed %}
             Please use this tool carefully. Changes you make here are not reversible. In most cases it is easier to
@@ -78,6 +84,13 @@
                                         {% if position.form.operation.value == "price" %}checked="checked"{% endif %}>
                                 {% trans "Change price to" %}
                                 {% bootstrap_field position.form.price layout='inline' %}
+                            </label>
+                        </div>
+                        <div class="radio">
+                            <label>
+                                <input name="{{ position.form.prefix }}-operation" type="radio" value="split"
+                                        {% if position.form.operation.value == "split" %}checked="checked"{% endif %}>
+                                {% trans "Split into new order" %}
                             </label>
                         </div>
                         <div class="radio">
