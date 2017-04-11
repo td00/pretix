@@ -150,7 +150,7 @@ class CartManager:
                 raise CartError(error_messages['voucher_invalid_item'])
 
         if isinstance(op, self.AddOperation):
-            if op.item.category.is_addon and not op.addon_to:
+            if op.item.category and op.item.category.is_addon and not op.addon_to:
                 raise CartError(error_messages['addon_only'])
 
             if op.item.max_per_order or op.item.min_per_order:
