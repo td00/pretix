@@ -128,9 +128,10 @@ class CartManager:
         )
 
     def _check_max_cart_size(self):
-        cartsize = self.positions.count()
-        cartsize += sum([op.count for op in self._operations if isinstance(op, self.AddOperation)])
-        cartsize -= len([1 for op in self._operations if isinstance(op, self.RemoveOperation)])
+        cartsize = self.positions.filter(addon_to__isnull=True).count()
+        cartsize += sum([op.count for op in self._operations if isinstance(op, self.AddOperation) and not op.addon_to])
+        cartsize -= len([1 for op in self._operations if isinstance(op, self.RemoveOperation) if
+                         not op.position.addon_to_id])
         if cartsize > int(self.event.settings.max_items_per_order):
             # TODO: i18n plurals
             raise CartError(_(error_messages['max_items']) % (self.event.settings.max_items_per_order,))

@@ -1298,6 +1298,21 @@ class CartAddonTest(CartTestMixin, TestCase):
         ])
         assert not self.cm._operations
 
+    def test_exceed_max(self):
+        self.event.settings.max_items_per_order = 1
+        cp1 = CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        self.cm.set_addons([
+            {
+                'addon_to': cp1.pk,
+                'item': self.workshop1.pk,
+                'variation': None
+            }
+        ])
+        self.cm.commit()
+
     def test_sold_out(self):
         cp1 = CartPosition.objects.create(
             expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),

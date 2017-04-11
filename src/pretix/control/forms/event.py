@@ -257,7 +257,8 @@ class EventSettingsForm(SettingsForm):
     )
     max_items_per_order = forms.IntegerField(
         min_value=1,
-        label=_("Maximum number of items per order")
+        label=_("Maximum number of items per order"),
+        help_text=_("Add-on products will not be counted.")
     )
     reservation_time = forms.IntegerField(
         min_value=0,
