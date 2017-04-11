@@ -234,6 +234,7 @@ class AddOnsForm(forms.Form):
                     label=i.name,
                     required=False,
                     widget=forms.RadioSelect,
+                    help_text=i.description,
                     initial=current_addons.get(i.pk)
                 )
             else:
@@ -242,6 +243,7 @@ class AddOnsForm(forms.Form):
                     label=self._label(event, i, cached_availability),
                     required=False,
                     initial=i.pk in current_addons,
+                    help_text=i.description
                 )
 
             self.fields['item_%s' % i.pk] = field
