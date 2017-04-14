@@ -515,12 +515,12 @@ class CartTest(CartTestMixin, TestCase):
             event=self.event, cart_id=self.session_key, item=self.ticket,
             price=23, expires=now() + timedelta(minutes=10)
         )
-        CartPosition.objects.create(
+        cp = CartPosition.objects.create(
             event=self.event, cart_id=self.session_key, item=self.ticket,
             price=23, expires=now() + timedelta(minutes=10)
         )
         response = self.client.post('/%s/%s/cart/remove' % (self.orga.slug, self.event.slug), {
-            'item_%d' % self.ticket.id: '1',
+            'id': cp.pk
         }, follow=True)
         doc = BeautifulSoup(response.rendered_content, "lxml")
         self.assertIn('less than', doc.select('.alert-danger')[0].text)
