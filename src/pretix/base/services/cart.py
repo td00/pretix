@@ -54,7 +54,7 @@ error_messages = {
     'addon_max_count': _('You can select at most %(max)s add-ons from the category %(cat)s for the product %(base)s.'),
     'addon_min_count': _('You need to select at least %(min)s add-ons from the category %(cat)s for the '
                          'product %(base)s.'),
-    'addon_only': _('One of the products you selected can only be bought as an add-on to another project.'),
+    'addon_only': _('One of the products you selected can only be bought as an add-on to another product.'),
 }
 
 
@@ -306,6 +306,8 @@ class CartManager:
         input_addons = defaultdict(set)
         selected_addons = defaultdict(set)
         cpcache = {}
+        items_cache = {}
+        quota_cache = {}
         quota_diff = Counter()
         operations = []
         available_categories = defaultdict(set)
@@ -369,7 +371,6 @@ class CartManager:
             for iao in item.addons.all():
                 selected = selected_addons[cp.id, iao.addon_category_id]
                 if len(selected) > iao.max_count:
-                    # TODO: Proper i18n
                     # TODO: Proper pluralization
                     raise CartError(
                         error_messages['addon_max_count'],
@@ -379,8 +380,7 @@ class CartManager:
                             'cat': str(iao.addon_category.name),
                         }
                     )
-                elif len(selected) < iao.min_count:
-                    # TODO: Proper i18n
+                elif len(selected) < iao.pragmatic_min_count(items_cache, quota_cache, quota_diff):
                     # TODO: Proper pluralization
                     raise CartError(
                         error_messages['addon_min_count'],

@@ -2,12 +2,10 @@ from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db.models import Count, Prefetch, Q
 from django.utils.formats import number_format
-from django.utils.timezone import now
 from django.utils.translation import ugettext_lazy as _
 
-from pretix.base.models import ItemVariation, Question
+from pretix.base.models import Item, ItemVariation, Question
 from pretix.base.models.orders import InvoiceAddress
 
 
@@ -164,7 +162,9 @@ class AddOnsForm(forms.Form):
             price_net = item.default_price_net
             label = item.name
 
-        if not item.tax_rate or not price:
+        if not price:
+            n = str(label)
+        elif not item.tax_rate:
             n = '{name} (+ {currency} {price})'.format(
                 name=label, currency=event.currency, price=number_format(price)
             )
@@ -183,6 +183,8 @@ class AddOnsForm(forms.Form):
             n += ' – {}'.format(_('SOLD OUT'))
         elif avail[0] < 100:
             n += ' – {}'.format(_('Currently unavailable'))
+        elif event.settings.show_quota_left and avail[1] is not None:
+            n += ' – {}'.format(_('%d more available') % avail[1])
 
         return n
 
@@ -202,25 +204,9 @@ class AddOnsForm(forms.Form):
         super().__init__(*args, **kwargs)
 
         if category.pk not in item_cache:
-            items = category.items.filter(
-                Q(active=True)
-                & Q(Q(available_from__isnull=True) | Q(available_from__lte=now()))
-                & Q(Q(available_until__isnull=True) | Q(available_until__gte=now()))
-                & Q(hide_without_voucher=False)
-            ).prefetch_related(
-                'variations__quotas',  # for .availability()
-                Prefetch('quotas', queryset=event.quotas.all()),
-                Prefetch('variations', to_attr='available_variations',
-                         queryset=ItemVariation.objects.filter(active=True, quotas__isnull=False).distinct()),
-            ).annotate(
-                quotac=Count('quotas'),
-                has_variations=Count('variations')
-            ).filter(
-                quotac__gt=0
-            ).order_by('category__position', 'category_id', 'position', 'name')
-            item_cache[category.pk] = items
-        else:
-            items = item_cache[category.pk]
+            item_cache[category.pk] = Item.objects.within_category_for_quota(category)
+
+        items = item_cache[category.pk]
 
         for i in items:
             if i.has_variations:

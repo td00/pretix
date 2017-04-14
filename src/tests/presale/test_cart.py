@@ -1313,6 +1313,83 @@ class CartAddonTest(CartTestMixin, TestCase):
         ])
         self.cm.commit()
 
+    def test_min_count_sold_out_ok(self):
+        self.addon1.min_count = 1
+        self.addon1.max_count = 2
+        self.addon1.save()
+        CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        with self.assertRaises(CartError):
+            self.cm.set_addons([])
+        self.workshopquota.size = 0
+        self.workshopquota.save()
+        self.cm.set_addons([])
+        self.cm.commit()
+
+    def test_min_count_sold_out_partially_in_cart(self):
+        self.addon1.min_count = 1
+        self.addon1.max_count = 2
+        self.addon1.save()
+        cp1 = CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        cp2 = CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.workshop1, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key, addon_to=cp1
+        )
+        self.workshopquota.size = 1
+        self.workshopquota.save()
+        self.cm.set_addons([
+            {
+                'addon_to': cp1.pk,
+                'item': self.workshop1.pk,
+                'variation': None
+            }
+        ])
+        self.cm.commit()
+        assert cp1.addons.count() == 1
+        assert cp2.addons.count() == 0
+
+    def test_min_count_sold_out_partially(self):
+        self.addon1.min_count = 1
+        self.addon1.max_count = 2
+        self.addon1.save()
+        cp1 = CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        cp2 = CartPosition.objects.create(
+            expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),
+            event=self.event, cart_id=self.session_key
+        )
+        with self.assertRaises(CartError):
+            self.cm.set_addons([
+                {
+                    'addon_to': cp1.pk,
+                    'item': self.workshop1.pk,
+                    'variation': None
+                }
+            ])
+        self.workshopquota.size = 1
+        self.workshopquota.save()
+        self.cm.set_addons([
+            {
+                'addon_to': cp1.pk,
+                'item': self.workshop1.pk,
+                'variation': None
+            }
+        ])
+        self.cm.commit()
+        assert cp1.addons.count() == 1
+        assert cp2.addons.count() == 0
+
     def test_sold_out(self):
         cp1 = CartPosition.objects.create(
             expires=now() + timedelta(minutes=10), item=self.ticket, price=Decimal('23.00'),

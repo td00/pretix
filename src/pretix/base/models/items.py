@@ -7,7 +7,7 @@ from typing import Tuple
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import F, Func, Q, Sum
+from django.db.models import Count, F, Func, Prefetch, Q, Sum
 from django.utils.functional import cached_property
 from django.utils.timezone import now
 from django.utils.translation import ugettext_lazy as _
@@ -86,6 +86,26 @@ def itempicture_upload_to(instance, filename: str) -> str:
         instance.event.organizer.slug, instance.event.slug, instance.id,
         str(uuid.uuid4()), filename.split('.')[-1]
     )
+
+
+class ItemManager(models.Manager):
+    def within_category_for_quota(self, category):
+        return category.items.filter(
+            Q(active=True) & Q(category=category)
+            & Q(Q(available_from__isnull=True) | Q(available_from__lte=now()))
+            & Q(Q(available_until__isnull=True) | Q(available_until__gte=now()))
+            & Q(hide_without_voucher=False)
+        ).prefetch_related(
+            'variations__quotas',  # for .availability()
+            Prefetch('quotas', queryset=category.event.quotas.all()),
+            Prefetch('variations', to_attr='available_variations',
+                     queryset=ItemVariation.objects.filter(active=True, quotas__isnull=False).distinct()),
+        ).annotate(
+            quotac=Count('quotas'),
+            has_variations=Count('variations')
+        ).filter(
+            quotac__gt=0
+        ).order_by('category__position', 'category_id', 'position', 'name')
 
 
 class Item(LoggedModel):
@@ -232,6 +252,8 @@ class Item(LoggedModel):
                     'number of items in the whole order applies regardless.')
     )
 
+    objects = ItemManager()
+
     class Meta:
         verbose_name = _("Product")
         verbose_name_plural = _("Products")
@@ -269,7 +291,7 @@ class Item(LoggedModel):
             return False
         return True
 
-    def check_quotas(self, ignored_quotas=None, count_waitinglist=True, _cache=None):
+    def check_quotas(self, ignored_quotas=None, count_waitinglist=True, _cache=None, _subtract: dict={}):
         """
         This method is used to determine whether this Item is currently available
         for sale.
@@ -288,10 +310,11 @@ class Item(LoggedModel):
             check_quotas -= set(ignored_quotas)
         if not check_quotas:
             return Quota.AVAILABILITY_OK, sys.maxsize
-        if self.variations.count() > 0:  # NOQA
+        if self.has_variations:  # NOQA
             raise ValueError('Do not call this directly on items which have variations '
                              'but call this on their ItemVariation objects')
-        return min([q.availability(count_waitinglist=count_waitinglist, _cache=_cache) for q in check_quotas],
+        return min([q.availability(count_waitinglist=count_waitinglist, _cache=_cache, _subtract=_subtract.get(q, 0))
+                    for q in check_quotas],
                    key=lambda s: (s[0], s[1] if s[1] is not None else sys.maxsize))
 
     @cached_property
@@ -362,7 +385,7 @@ class ItemVariation(models.Model):
         if self.item:
             self.item.event.get_cache().clear()
 
-    def check_quotas(self, ignored_quotas=None, count_waitinglist=True, _cache=None) -> Tuple[int, int]:
+    def check_quotas(self, ignored_quotas=None, count_waitinglist=True, _cache=None, _subtract: dict={}) -> Tuple[int, int]:
         """
         This method is used to determine whether this ItemVariation is currently
         available for sale in terms of quotas.
@@ -379,7 +402,8 @@ class ItemVariation(models.Model):
             check_quotas -= set(ignored_quotas)
         if not check_quotas:
             return Quota.AVAILABILITY_OK, sys.maxsize
-        return min([q.availability(count_waitinglist=count_waitinglist, _cache=_cache) for q in check_quotas],
+        return min([q.availability(count_waitinglist=count_waitinglist, _cache=_cache, _subtract=_subtract.get(q, 0))
+                    for q in check_quotas],
                    key=lambda s: (s[0], s[1] if s[1] is not None else sys.maxsize))
 
     def __lt__(self, other):
@@ -418,6 +442,34 @@ class ItemAddOn(models.Model):
     def clean(self):
         if self.max_count < self.min_count:
             raise ValidationError(_('The minimum number needs to be lower than the maximum number.'))
+
+    def pragmatic_min_count(self, item_cache: dict=None, quota_cache: dict=None, quotadiff: dict={}) -> int:
+        """
+        Determine the min_count that is actually possible to fulfill given current quota
+        limits.
+        """
+        item_cache = item_cache or {}
+        quota_cache = quota_cache or {}
+
+        if self.addon_category.pk not in item_cache:
+            items = Item.objects.within_category_for_quota(self.addon_category)
+            item_cache[self.addon_category.pk] = items
+        else:
+            items = item_cache[self.addon_category.pk]
+
+        available = 0
+        for i in items:
+            if i.has_variations:
+                for v in i.available_variations:
+                    cached_availability = v.check_quotas(_cache=quota_cache, _subtract=quotadiff)
+                    if cached_availability[1] > 0:
+                        available += 1
+                        break
+            else:
+                cached_availability = i.check_quotas(_cache=quota_cache, _subtract=quotadiff)
+                if cached_availability[1] > 0:
+                    available += 1
+        return min(available, self.min_count)
 
 
 class Question(LoggedModel):
@@ -615,7 +667,7 @@ class Quota(LoggedModel):
         if self.event:
             self.event.get_cache().clear()
 
-    def availability(self, now_dt: datetime=None, count_waitinglist=True, _cache=None) -> Tuple[int, int]:
+    def availability(self, now_dt: datetime=None, count_waitinglist=True, _cache=None, _subtract=0) -> Tuple[int, int]:
         """
         This method is used to determine whether Items or ItemVariations belonging
         to this quota should currently be available for sale.
@@ -627,12 +679,20 @@ class Quota(LoggedModel):
             _cache.clear()
 
         if _cache is not None and self.pk in _cache:
-            return _cache[self.pk]
-        res = self._availability(now_dt, count_waitinglist)
-        if _cache is not None:
-            _cache[self.pk] = res
-            _cache['_count_waitinglist'] = count_waitinglist
-        return res
+            res = _cache[self.pk]
+        else:
+            res = self._availability(now_dt, count_waitinglist)
+            if _cache is not None:
+                _cache[self.pk] = res
+                _cache['_count_waitinglist'] = count_waitinglist
+
+        new_size = res[1] - _subtract if res[1] is not None else None
+        if res[1] is not None and res[1] > 0 and new_size == 0:
+            new_avail = Quota.AVAILABILITY_GONE
+        else:
+            new_avail = res[0]
+
+        return new_avail, new_size
 
     def _availability(self, now_dt: datetime=None, count_waitinglist=True):
         now_dt = now_dt or now()

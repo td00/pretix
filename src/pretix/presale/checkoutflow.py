@@ -140,13 +140,16 @@ class AddOnsStep(CartMixin, AsyncAction, TemplateFlowStep):
         return get_cart(request).filter(item__addons__isnull=False).exists()
 
     def is_completed(self, request, warn=False):
+        quota_cache = {}
+        item_cache = {}
         for cartpos in get_cart(request).filter(addon_to__isnull=True).prefetch_related(
-            'item__addons', 'item__addons__addon_category', 'addons', 'addons__item'
+            'item__addons', 'item__addons__addon_category', 'addons', 'addons__item',
+            'addons__variation', 'item__addons__base_item__event'
         ):
             a = cartpos.addons.all()
             for iao in cartpos.item.addons.all():
                 found = len([1 for p in a if p.item.category_id == iao.addon_category_id])
-                if found < iao.min_count or found > iao.max_count:
+                if found < iao.pragmatic_min_count(item_cache, quota_cache) or found > iao.max_count:
                     return False
         return True
 
@@ -161,7 +164,8 @@ class AddOnsStep(CartMixin, AsyncAction, TemplateFlowStep):
         quota_cache = {}
         item_cache = {}
         for cartpos in get_cart(self.request).filter(addon_to__isnull=True).prefetch_related(
-            'item__addons', 'item__addons__addon_category', 'addons', 'addons__variation'
+            'item__addons', 'item__addons__addon_category', 'addons', 'addons__variation',
+            'item__addons__base_item__event'
         ):
             current_addon_products = {
                 a.item_id: a.variation_id for a in cartpos.addons.all()
@@ -175,7 +179,7 @@ class AddOnsStep(CartMixin, AsyncAction, TemplateFlowStep):
             for iao in cartpos.item.addons.all():
                 category = {
                     'category': iao.addon_category,
-                    'min_count': iao.min_count,
+                    'min_count': iao.pragmatic_min_count(item_cache, quota_cache),
                     'max_count': iao.max_count,
                     'form': AddOnsForm(
                         event=self.request.event,

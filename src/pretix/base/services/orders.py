@@ -60,6 +60,9 @@ error_messages = {
                               'removed this item from your cart.'),
     'voucher_required': _('You need a valid voucher code to order one of the products in your cart. We removed this '
                           'item from your cart.'),
+    'addon_only': _('One of the products you selected can only be bought as an add-on to another product.'),
+    'addon_max_count': _('You selected to many add-ons for one of the products.'),
+    'addon_min_count': _('You did not select enoight add-ons for one of the products.'),
 }
 
 logger = logging.getLogger(__name__)
@@ -210,6 +213,8 @@ def _check_positions(event: Event, now_dt: datetime, positions: List[CartPositio
     err = None
     errargs = None
     _check_date(event, now_dt)
+    quota_cache = {}
+    items_cache = {}
 
     products_seen = Counter()
     for i, cp in enumerate(positions):
@@ -241,6 +246,18 @@ def _check_positions(event: Event, now_dt: datetime, positions: List[CartPositio
             cp.delete()
             err = error_messages['voucher_required']
             break
+
+        # Just to double-check addon constraints. Shouldn't be necessary.
+        if cp.item.category and cp.item.category.is_addon and not cp.addon_to:
+            raise OrderError(error_messages['addon_only'])
+
+        a = cp.addons.all()
+        for iao in cp.item.addons.all():
+            found = len([1 for p in a if p.item.category_id == iao.addon_category_id])
+            if found < iao.pragmatic_min_count(items_cache, quota_cache):
+                raise OrderError(error_messages['addon_min_count'])
+            elif found > iao.min_count:
+                raise OrderError(error_messages['addon_max_count'])
 
         if cp.item.hide_without_voucher and (cp.voucher is None or cp.voucher.item is None
                                              or cp.voucher.item.pk != cp.item.pk):
