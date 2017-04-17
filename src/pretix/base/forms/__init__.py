@@ -8,8 +8,6 @@ from hierarkey.forms import HierarkeyForm
 
 from pretix.base.models import Event
 
-from .validators import PlaceholderValidator  # NOQA
-
 logger = logging.getLogger('pretix.plugins.ticketoutputpdf')
 
 
