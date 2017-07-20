@@ -104,7 +104,8 @@ setup(
         'vobject==0.9.*',
         'pycountry',
         'django-countries',
-        'pyuca'
+        'pyuca',
+        'vat_moss==0.11.0'
     ],
     extras_require={
         'dev': [
