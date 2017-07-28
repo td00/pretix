@@ -78,23 +78,14 @@ First, define your URL in your ``urls.py``, but this time in the ``event_pattern
         url(r'^mypluginname/', views.frontend_view, name='frontend'),
     ]
 
-You can then implement a view as you would normally do, but you need to apply a decorator to your
-view if you want pretix's default behavior::
-
-    from pretix.presale.utils import event_view
-
-    @event_view
-    def some_event_view(request, *args, **kwargs):
-        ...
-
-This decorator will check the URL arguments for their ``event`` and ``organizer`` parameters and
-correctly ensure that:
+You can then implement a view as you would normally do. It will be automatically ensured that:
 
 * The requested event exists
-* The requested event is activated (can be overridden by decorating with ``@event_view(require_live=False)``)
+* The requested event is activated
 * The event is accessed via the domain it should be accessed
 * The ``request.event`` attribute contains the correct ``Event`` object
 * The ``request.organizer`` attribute contains the correct ``Organizer`` object
+* Your plugin is enabled
 * The locale is set correctly
 
 REST API viewsets
