@@ -132,6 +132,8 @@ urlpatterns = [
             name='event.order.regeninvoice'),
         url(r'^orders/(?P<code>[0-9A-Z]+)/invoices/(?P<id>\d+)/reissue$', orders.OrderInvoiceReissue.as_view(),
             name='event.order.reissueinvoice'),
+        url(r'^orders/(?P<code>[0-9A-Z]+)/checkvatid', orders.OrderCheckVATID.as_view(),
+            name='event.order.checkvatid'),
         url(r'^orders/(?P<code>[0-9A-Z]+)/extend$', orders.OrderExtend.as_view(),
             name='event.order.extend'),
         url(r'^orders/(?P<code>[0-9A-Z]+)/contact$', orders.OrderContactChange.as_view(),
